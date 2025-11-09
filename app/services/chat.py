@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict, Any
-import time 
+import time
 import openai
 
 from app.services.embedder import Embedder
@@ -11,8 +11,11 @@ from app.logger import logger
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+
 class ChatService:
-    def __init__(self, qdrant: QdrantWrapper, embedder: Embedder, model: str = "gpt-3.5-turbo"):
+    def __init__(
+        self, qdrant: QdrantWrapper, embedder: Embedder, model: str = "gpt-3.5-turbo"
+    ):
         """
         Initialize the ChatService.
 
@@ -24,6 +27,7 @@ class ChatService:
         self.qdrant = qdrant
         self.embedder = embedder
         self.model = model
+        self.chat_history = []
 
     def _embed_query(self, question: str) -> Any:
         """Compute the embedding for a question and record metrics."""
@@ -42,7 +46,9 @@ class ChatService:
             results = self.qdrant.search(query_emb, top_k=top_k)
             duration = time.perf_counter() - qdrant_start
             metrics.QDRANT_SEARCH_LATENCY.observe(duration)
-            logger.info(f"Qdrant search completed in {duration:.3f}s with {len(results)} results")
+            logger.info(
+                f"Qdrant search completed in {duration:.3f}s with {len(results)} results"
+            )
             return results
         except Exception as e:
             metrics.CHAT_ERRORS.labels(model=self.model, stage="qdrant").inc()
@@ -58,16 +64,24 @@ class ChatService:
             f"Question: {question}\nAnswer:"
         )
 
-    def _generate_answer(self, prompt: str, max_tokens: int) -> str:
+    def _build_messages(self, prompt: str) -> List[Dict[str, Any]]:
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful research assistant.",
+            },
+        ]
+        messages.extend(self.chat_history)
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    def _generate_answer(self, messages: str, max_tokens: int) -> str:
         """Send the prompt to OpenAI, record metrics, and return the answer."""
         try:
             openai_start = time.perf_counter()
             response = openai.ChatCompletion.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful research assistant."},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
                 max_tokens=max_tokens,
             )
             duration = time.perf_counter() - openai_start
@@ -90,7 +104,9 @@ class ChatService:
             context_parts.append(f"Title: {title}\nAim: {aim}\nFindings: {findings}")
         return "\n\n".join(context_parts)
 
-    def answer_question(self, question: str, top_k: int = 5, max_tokens: int = 200) -> Dict[str, Any]:
+    def answer_question(
+        self, question: str, top_k: int = 5, max_tokens: int = 200
+    ) -> Dict[str, Any]:
         """
         Answer a user question using retrieved literature and an OpenAI chat model.
 
@@ -109,10 +125,14 @@ class ChatService:
         query_emb = self._embed_query(question)
         results = self._search_qdrant(query_emb, top_k)
         prompt = self._build_prompt(question, results)
-        answer = self._generate_answer(prompt, max_tokens)
+        messages = self._build_messages(prompt)
+        answer = self._generate_answer(messages, max_tokens)
 
         total_duration = time.perf_counter() - total_start
         metrics.CHAT_LATENCY.labels(model=self.model).observe(total_duration)
         logger.info(f"Total ChatService duration: {total_duration:.3f}s")
+
+        self.chat_history.append({"role": "user", "content": question})
+        self.chat_history.append({"role": "assistant", "content": answer})
 
         return {"answer": answer, "context_docs": results}
