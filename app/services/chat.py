@@ -1,7 +1,8 @@
-import os
+import os, json
 from typing import List, Dict, Any
 import time
 import openai
+import requests
 
 from app.services.embedder import Embedder
 from app.services.qdrant_wrapper import QdrantWrapper
@@ -14,7 +15,11 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class ChatService:
     def __init__(
-        self, qdrant: QdrantWrapper, embedder: Embedder, model: str = "gpt-3.5-turbo"
+        self,
+        qdrant: QdrantWrapper,
+        embedder: Embedder,
+        model: str = "gpt-3.5-turbo",
+        chat_history: List[Dict[str, Any]] = [],
     ):
         """
         Initialize the ChatService.
@@ -23,11 +28,12 @@ class ChatService:
             qdrant (QdrantWrapper): Wrapper for the Qdrant vector database.
             embedder (Embedder): Text embedding service.
             model (str): OpenAI chat model to use. Defaults to 'gpt-3.5-turbo'.
+            chat_history (List[Dict[str, Any]]): Previous questions and answers to provide more context. Defaults to empty list.
         """
         self.qdrant = qdrant
         self.embedder = embedder
         self.model = model
-        self.chat_history = []
+        self.chat_history = chat_history
 
     def _embed_query(self, question: str) -> Any:
         """Compute the embedding for a question and record metrics."""
@@ -75,7 +81,7 @@ class ChatService:
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    def _generate_answer(self, messages: str, max_tokens: int) -> str:
+    def _generate_answer(self, messages: List[Dict[str, Any]], max_tokens: int) -> str:
         """Send the prompt to OpenAI, record metrics, and return the answer."""
         try:
             openai_start = time.perf_counter()
@@ -101,7 +107,10 @@ class ChatService:
             title = payload.get("TITLE OF THE PAPER", "")
             aim = payload.get("AIM OF THE PAPER", "")
             findings = payload.get("MAIN FINDINGS OF THE PAPER", "")
-            context_parts.append(f"Title: {title}\nAim: {aim}\nFindings: {findings}")
+            reviewer = payload.get("YOUR COMPLETE NAME", "")
+            context_parts.append(
+                f"Title: {title}\nAim: {aim}\nFindings: {findings}\n Reviewer: {reviewer}"
+            )
         return "\n\n".join(context_parts)
 
     def answer_question(

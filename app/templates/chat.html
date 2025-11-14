@@ -17,7 +17,16 @@
         <button type="submit" class="btn btn-success w-100">Ask</button>
     </div>
 </form>
-
+{% if chat_history %}
+<h3>Questions</h3>
+<ul>
+    {% for question in chat_history %}
+        {% if question.get("role") == "user" %}    
+            <li>{{ question.get("content") }}</li>
+        {% endif %}
+    {% endfor %}
+</ul>
+{% endif %}
 {% if answer %}
 <h3>Answer</h3>
 <div class="alert alert-info">
